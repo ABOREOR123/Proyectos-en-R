@@ -6,7 +6,7 @@ library(shinyjs)
 library(DT)
 library(shinyWidgets)
 
-
+# Datos de ejemplo más completos
 ejercicios <- data.frame(
   dia = rep(c("Lunes", "Martes", "Miércoles", "Jueves", "Viernes"), each = 4),
   ejercicio = c(
@@ -22,18 +22,8 @@ ejercicios <- data.frame(
     "Espalda", "Femorales", "Espalda", "Bíceps",
     "Femorales", "Femorales", "Glúteos", "Gemelos",
     "Hombros", "Hombros", "Hombros", "Trapecios"
-  )
-)
-
-
-grupos_musculares <- c(
-  "Brazo (Contraído)" = "brazo_contraido",
-  "Brazo (Relajado)" = "brazo_relajado",
-  "Pecho" = "pecho",
-  "Cintura" = "cintura",
-  "Cadera" = "cadera",
-  "Muslo" = "muslo",
-  "Pantorrilla" = "pantorrilla"
+  ),
+  tipo = rep(c("Hipertrofia", "Fuerza", "Control excéntrico", "Resistencia"), 5)
 )
 
 # Función para calcular 1RM (Fórmula de Epley)
@@ -60,16 +50,10 @@ ui <- fluidPage(
         border-radius: 5px;
         margin: 10px 0;
       }
-      .medidas-input {
-        background: #f9f9f9;
-        padding: 15px;
-        border-radius: 5px;
-        margin-bottom: 15px;
-      }
     "))
   ),
   
-  titlePanel("💪 Gym Progress Tracker - Seguimiento de Medidas"),
+  titlePanel("💪 Gym Progress Tracker"),
   
   # Sistema de autenticación básico
   uiOutput("auth_panel"),
@@ -88,17 +72,8 @@ ui <- fluidPage(
         textAreaInput("notas", "Notas adicionales:"),
         actionButton("guardar", "Guardar Entrenamiento", class = "btn-primary"),
         hr(),
-        
-        # Panel de registro de medidas corporales
-        div(class = "medidas-input",
-            h4("Registro de Medidas Corporales (cm)"),
-            dateInput("fecha_medidas", "Fecha de medidas:", value = Sys.Date()),
-            numericInput("peso_corporal", "Peso corporal (kg):", value = NA, min = 30),
-            lapply(seq_along(grupos_musculares), function(i) {
-              numericInput(names(grupos_musculares)[i], names(grupos_musculares)[i], value = NA, min = 0, step = 0.5)
-            }),
-            actionButton("guardar_medidas", "Guardar Medidas", class = "btn-success")
-        )
+        fileInput("foto_progreso", "Subir foto de progreso:", accept = c("image/png", "image/jpeg")),
+        uiOutput("foto_reciente")
       ),
       
       mainPanel(
@@ -115,14 +90,12 @@ ui <- fluidPage(
                    h4("Máximos Personales"),
                    DTOutput("maximos_table")),
           
-          tabPanel("📏 Medidas Corporales",
-                   h3("Evolución de tus Medidas"),
-                   selectInput("medida_seleccionada", "Selecciona medida a visualizar:",
-                               choices = c("Peso corporal" = "peso_corporal", grupos_musculares)),
-                   plotOutput("grafico_medidas"),
-                   h4("Resumen de Cambios"),
-                   DTOutput("resumen_medidas"),
-                   uiOutput("analisis_composicion"))
+          tabPanel("📅 Historial", 
+                   DTOutput("historial_table"),
+                   downloadButton("descargar_historial", "Descargar Historial")),
+          
+          tabPanel("📸 Progreso Visual",
+                   uiOutput("galeria_fotos"))
         )
       )
     )
@@ -146,6 +119,7 @@ server <- function(input, output, session) {
   })
   
   observeEvent(input$login, {
+    # Aquí podrías validar contra una base de datos real
     if (input$username != "" && input$password != "") {
       user_data$logged_in <- TRUE
       user_data$username <- input$username
@@ -172,17 +146,10 @@ server <- function(input, output, session) {
     volumen = numeric()
   ))
   
-  medidas_corporales <- reactiveVal(data.frame(
+  fotos_progreso <- reactiveVal(data.frame(
     fecha = as.Date(character()),
     usuario = character(),
-    peso_corporal = numeric(),
-    brazo_contraido = numeric(),
-    brazo_relajado = numeric(),
-    pecho = numeric(),
-    cintura = numeric(),
-    cadera = numeric(),
-    muslo = numeric(),
-    pantorrilla = numeric()
+    ruta = character()
   ))
   
   # Cargar datos guardados al iniciar
@@ -190,8 +157,8 @@ server <- function(input, output, session) {
     if (file.exists("registros.rds")) {
       registros(readRDS("registros.rds"))
     }
-    if (file.exists("medidas_corporales.rds")) {
-      medidas_corporales(readRDS("medidas_corporales.rds"))
+    if (file.exists("fotos_progreso.rds")) {
+      fotos_progreso(readRDS("fotos_progreso.rds"))
     }
   })
   
@@ -201,7 +168,15 @@ server <- function(input, output, session) {
     selectInput("ejercicio", "Ejercicio:", ejercicios_dia$ejercicio)
   })
   
-  # Guardar nuevo registro de entrenamiento
+  # Obtener músculo principal del ejercicio seleccionado
+  musculo_actual <- reactive({
+    ejercicios %>% 
+      filter(ejercicio == input$ejercicio) %>% 
+      pull(musculo_principal) %>% 
+      first()
+  })
+  
+  # Guardar nuevo registro
   observeEvent(input$guardar, {
     req(input$ejercicio, input$peso > 0, input$repeticiones > 0)
     
@@ -212,10 +187,7 @@ server <- function(input, output, session) {
       fecha = input$fecha,
       usuario = user_data$username,
       ejercicio = input$ejercicio,
-      musculo = ejercicios %>% 
-        filter(ejercicio == input$ejercicio) %>% 
-        pull(musculo_principal) %>% 
-        first(),
+      musculo = musculo_actual(),
       peso = input$peso,
       repeticiones = input$repeticiones,
       esfuerzo = input$esfuerzo,
@@ -228,166 +200,189 @@ server <- function(input, output, session) {
     registros(rbind(registros(), nuevo_registro))
     saveRDS(registros(), "registros.rds")
     
+    # Resetear inputs
     reset("peso")
     reset("repeticiones")
     reset("notas")
     showNotification("Entrenamiento guardado!", type = "message")
   })
   
-  # Guardar medidas corporales
-  observeEvent(input$guardar_medidas, {
-    req(input$fecha_medidas)
+  # Procesar foto de progreso
+  observeEvent(input$foto_progreso, {
+    req(input$foto_progreso)
     
-    nueva_medida <- data.frame(
-      fecha = input$fecha_medidas,
+    # En una app real, aquí guardarías el archivo en un directorio seguro
+    nueva_foto <- data.frame(
+      fecha = input$fecha,
       usuario = user_data$username,
-      peso_corporal = ifelse(is.na(input$peso_corporal), NA, input$peso_corporal),
-      brazo_contraido = ifelse(is.na(input$`Brazo (Contraído)`), NA, input$`Brazo (Contraído)`),
-      brazo_relajado = ifelse(is.na(input$`Brazo (Relajado)`), NA, input$`Brazo (Relajado)`),
-      pecho = ifelse(is.na(input$Pecho), NA, input$Pecho),
-      cintura = ifelse(is.na(input$Cintura), NA, input$Cintura),
-      cadera = ifelse(is.na(input$Cadera), NA, input$Cadera),
-      muslo = ifelse(is.na(input$Muslo), NA, input$Muslo),
-      pantorrilla = ifelse(is.na(input$Pantorrilla), NA, input$Pantorrilla)
+      ruta = input$foto_progreso$name  # En producción usaría input$foto_progreso$datapath
     )
     
-    # Eliminar filas completamente vacías
-    if (!all(is.na(nueva_medida[,3:ncol(nueva_medida)]))) {
-      medidas_corporales(rbind(medidas_corporales(), nueva_medida))
-      saveRDS(medidas_corporales(), "medidas_corporales.rds")
-      
-      # Resetear inputs
-      lapply(names(grupos_musculares), function(x) reset(x))
-      reset("peso_corporal")
-      showNotification("Medidas guardadas!", type = "message")
-    } else {
-      showNotification("Debes ingresar al menos una medida", type = "warning")
+    fotos_progreso(rbind(fotos_progreso(), nueva_foto))
+    saveRDS(fotos_progreso(), "fotos_progreso.rds")
+  })
+  
+  # Mostrar foto más reciente
+  output$foto_reciente <- renderUI({
+    fotos_usuario <- fotos_progreso() %>% 
+      filter(usuario == user_data$username) %>% 
+      arrange(desc(fecha))
+    
+    if (nrow(fotos_usuario) > 0) {
+      tagList(
+        h5("Última foto de progreso:"),
+        tags$img(src = fotos_usuario$ruta[1], width = "100%", 
+                 style = "border-radius: 5px; border: 1px solid #ddd;")
+      )
     }
   })
   
-  # Gráfico de progresión de medidas
-  output$grafico_medidas <- renderPlot({
-    req(nrow(medidas_corporales()) > 0)
-    datos_usuario <- medidas_corporales() %>% 
-      filter(usuario == user_data$username) %>% 
-      arrange(fecha)
+  # Gráfico de progresión
+  output$progresion_plot <- renderPlot({
+    req(nrow(registros()) > 0)
+    datos_usuario <- registros() %>% 
+      filter(usuario == user_data$username, ejercicio == input$ejercicio)
     
     if (nrow(datos_usuario) == 0) return(NULL)
     
-    medida <- input$medida_seleccionada
-    
-    ggplot(datos_usuario, aes_string(x = "fecha", y = medida)) +
-      geom_line(color = "#3498db", size = 1) +
-      geom_point(color = "#2980b9", size = 3) +
-      labs(title = paste("Evolución de", 
-                         ifelse(medida == "peso_corporal", "Peso Corporal", 
-                                names(grupos_musculares)[grupos_musculares == medida])),
-           x = "Fecha", y = ifelse(medida == "peso_corporal", "Peso (kg)", "Circunferencia (cm)")) +
+    ggplot(datos_usuario, aes(x = fecha, y = peso)) +
+      geom_line(aes(color = "Peso")) +
+      geom_point(aes(color = "Peso")) +
+      geom_line(aes(y = rm_estimado, color = "1RM Estimado")) +
+      geom_point(aes(y = rm_estimado, color = "1RM Estimado")) +
+      labs(title = paste("Progresión en", input$ejercicio),
+           x = "Fecha", y = "Peso (kg)", color = "Métrica") +
+      scale_color_manual(values = c("Peso" = "#3498db", "1RM Estimado" = "#e74c3c")) +
       theme_minimal() +
-      theme(plot.title = element_text(size = 16, face = "bold"))
+      theme(legend.position = "top")
   })
   
-  # Resumen de cambios en medidas
-  output$resumen_medidas <- renderDT({
-    req(nrow(medidas_corporales()) > 0)
+  # Gráfico de volumen por grupo muscular
+  output$volumen_muscular_plot <- renderPlot({
+    req(nrow(registros()) > 0)
     
-    datos_usuario <- medidas_corporales() %>% 
+    registros() %>% 
       filter(usuario == user_data$username) %>% 
-      arrange(fecha)
+      group_by(musculo, semana = floor_date(fecha, "week")) %>% 
+      summarise(volumen_total = sum(volumen), .groups = "drop") %>% 
+      ggplot(aes(x = semana, y = volumen_total, fill = musculo)) +
+      geom_col(position = "dodge") +
+      labs(title = "Volumen de Entrenamiento por Grupo Muscular",
+           x = "Semana", y = "Volumen Total (kg x reps)") +
+      theme_minimal()
+  })
+  
+  # Gráfico de progresión de fuerza
+  output$fuerza_plot <- renderPlot({
+    req(nrow(registros()) > 0)
     
-    if (nrow(datos_usuario) < 2) return(NULL)
+    registros() %>% 
+      filter(usuario == user_data$username) %>% 
+      group_by(ejercicio) %>% 
+      filter(fecha == max(fecha)) %>% 
+      ggplot(aes(x = reorder(ejercicio, rm_estimado), y = rm_estimado)) +
+      geom_col(fill = "#2ecc71") +
+      coord_flip() +
+      labs(title = "1RM Estimado por Ejercicio (Última sesión)",
+           x = "", y = "1RM Estimado (kg)") +
+      theme_minimal()
+  })
+  
+  # Tabla de máximos personales
+  output$maximos_table <- renderDT({
+    req(nrow(registros()) > 0)
     
-    primera <- datos_usuario[1, ]
-    ultima <- datos_usuario[nrow(datos_usuario), ]
-    
-    cambios <- data.frame(
-      Medida = c("Peso", names(grupos_musculares)),
-      Inicial = c(primera$peso_corporal, 
-                  primera$brazo_contraido, primera$brazo_relajado,
-                  primera$pecho, primera$cintura, primera$cadera,
-                  primera$muslo, primera$pantorrilla),
-      Actual = c(ultima$peso_corporal,
-                 ultima$brazo_contraido, ultima$brazo_relajado,
-                 ultima$pecho, ultima$cintura, ultima$cadera,
-                 ultima$muslo, ultima$pantorrilla),
-      Cambio = c(
-        ifelse(!is.na(primera$peso_corporal) && !is.na(ultima$peso_corporal),
-               ultima$peso_corporal - primera$peso_corporal, NA),
-        ifelse(!is.na(primera$brazo_contraido) && !is.na(ultima$brazo_contraido),
-               ultima$brazo_contraido - primera$brazo_contraido, NA),
-        ifelse(!is.na(primera$brazo_relajado) && !is.na(ultima$brazo_relajado),
-               ultima$brazo_relajado - primera$brazo_relajado, NA),
-        ifelse(!is.na(primera$pecho) && !is.na(ultima$pecho),
-               ultima$pecho - primera$pecho, NA),
-        ifelse(!is.na(primera$cintura) && !is.na(ultima$cintura),
-               ultima$cintura - primera$cintura, NA),
-        ifelse(!is.na(primera$cadera) && !is.na(ultima$cadera),
-               ultima$cadera - primera$cadera, NA),
-        ifelse(!is.na(primera$muslo) && !is.na(ultima$muslo),
-               ultima$muslo - primera$muslo, NA),
-        ifelse(!is.na(primera$pantorrilla) && !is.na(ultima$pantorrilla),
-               ultima$pantorrilla - primera$pantorrilla, NA)
-      )
-    )
-    
-    # Formatear para mostrar
-    cambios %>% 
-      mutate(
-        Inicial = ifelse(is.na(Inicial), "-", 
-                         ifelse(Medida == "Peso", 
-                                paste(round(Inicial, 1), "kg"),
-                                paste(round(Inicial, 1), "cm"))),
-        Actual = ifelse(is.na(Actual), "-",
-                        ifelse(Medida == "Peso", 
-                               paste(round(Actual, 1), "kg"),
-                               paste(round(Actual, 1), "cm"))),
-        Cambio = ifelse(is.na(Cambio), "-",
-                        ifelse(Medida == "Peso", 
-                               paste(ifelse(Cambio >= 0, "+", ""), round(Cambio, 1), "kg"),
-                               paste(ifelse(Cambio >= 0, "+", ""), round(Cambio, 1), "cm")))
+    registros() %>% 
+      filter(usuario == user_data$username) %>% 
+      group_by(ejercicio) %>% 
+      summarise(
+        `1RM Máximo` = max(rm_estimado),
+        `Peso Máximo` = max(peso),
+        `Última sesión` = max(fecha),
+        `Mejora %` = paste0(round((max(peso) - min(peso)) / min(peso) * 100, 1), "%"),
+        .groups = "drop"
       ) %>% 
-      datatable(options = list(pageLength = 10), rownames = FALSE)
+      arrange(desc(`1RM Máximo`)) %>% 
+      datatable(options = list(pageLength = 5))
   })
   
-  # Análisis de composición corporal
-  output$analisis_composicion <- renderUI({
-    req(nrow(medidas_corporales()) > 1)
+  # Tabla de historial completo
+  output$historial_table <- renderDT({
+    req(nrow(registros()) > 0)
     
-    datos_usuario <- medidas_corporales() %>% 
+    registros() %>% 
       filter(usuario == user_data$username) %>% 
+      arrange(desc(fecha)) %>% 
+      select(Fecha = fecha, Ejercicio = ejercicio, Peso = peso, Reps = repeticiones, 
+             RPE = esfuerzo, `Al fallo` = al_fallo, Notas = notas) %>% 
+      datatable(options = list(pageLength = 10))
+  })
+  
+  # Galería de fotos de progreso
+  output$galeria_fotos <- renderUI({
+    fotos_usuario <- fotos_progreso() %>% 
+      filter(usuario == user_data$username) %>% 
+      arrange(desc(fecha))
+    
+    if (nrow(fotos_usuario) == 0) {
+      return(h4("No hay fotos de progreso aún."))
+    }
+    
+    fluidRow(
+      lapply(1:nrow(fotos_usuario), function(i) {
+        column(4,
+               h5(fotos_usuario$fecha[i]),
+               tags$img(src = fotos_usuario$ruta[i], width = "100%",
+                        style = "border-radius: 5px; border: 1px solid #ddd; margin-bottom: 15px;")
+        )
+      })
+    )
+  })
+  
+  # Recomendaciones basadas en progreso
+  output$recomendacion_progreso <- renderUI({
+    req(nrow(registros()) > 0 && input$ejercicio)
+    
+    datos_ejercicio <- registros() %>% 
+      filter(usuario == user_data$username, ejercicio == input$ejercicio) %>% 
       arrange(fecha)
     
-    primera <- datos_usuario[1, ]
-    ultima <- datos_usuario[nrow(datos_usuario), ]
+    if (nrow(datos_ejercicio) < 2) return(NULL)
     
-    # Solo mostrar análisis si tenemos las medidas necesarias
-    if (!is.na(primera$pecho) && !is.na(primera$cintura) && !is.na(primera$cadera) &&
-        !is.na(ultima$pecho) && !is.na(ultima$cintura) && !is.na(ultima$cadera)) {
-      
-      # Cálculo simple de relación cintura-cadera (indicator de distribución de grasa)
-      rcc_inicial <- round(primera$cintura / primera$cadera, 2)
-      rcc_actual <- round(ultima$cintura / ultima$cadera, 2)
-      
-      # Análisis cualitativo
-      analisis <- if (rcc_actual < rcc_inicial) {
-        "Mejoría en la distribución de grasa corporal (relación cintura-cadera reducida)."
-      } else if (rcc_actual > rcc_inicial) {
-        "Aumento en la relación cintura-cadera. Considera revisar tu nutrición y cardio."
-      } else {
-        "Estable en distribución de grasa corporal."
-      }
-      
-      div(
-        h4("Análisis de Composición Corporal"),
-        p(paste("Relación cintura-cadera inicial:", rcc_inicial)),
-        p(paste("Relación cintura-cadera actual:", rcc_actual)),
-        p(analisis)
-      )
+    ultimo <- tail(datos_ejercicio, 1)
+    anterior <- tail(datos_ejercicio, 2)[1,]
+    
+    diferencia_peso <- ultimo$peso - anterior$peso
+    diferencia_reps <- ultimo$repeticiones - anterior$repeticiones
+    
+    if (diferencia_peso > 0 || diferencia_reps > 0) {
+      recomendacion <- "¡Buen progreso! Considera aumentar ligeramente la carga en tu próxima sesión."
+    } else if (diferencia_peso == 0 && diferencia_reps == 0) {
+      recomendacion <- "Estancamiento detectado. Prueba variar el ejercicio o el esquema de series/repeticiones."
+    } else {
+      recomendacion <- "Disminución en el rendimiento. Revisa tu recuperación y nutrición."
     }
+    
+    if (ultimo$esfuerzo >= 8 && ultimo$al_fallo) {
+      recomendacion <- paste(recomendacion, "¡Cuidado con el sobreentrenamiento! Considera un día de descanso.")
+    }
+    
+    div(class = "recomendacion",
+        h4("Recomendación:"),
+        p(recomendacion),
+        p(paste("Último 1RM estimado:", ultimo$rm_estimado, "kg"))
+    )
   })
   
-  # [Resto del código del servidor permanece igual...]
-  # (Mantendrías las mismas funciones para progresion_plot, volumen_muscular_plot, etc.)
+  # Descargar historial
+  output$descargar_historial <- downloadHandler(
+    filename = function() {
+      paste("historial_entrenamiento_", user_data$username, "_", Sys.Date(), ".csv", sep = "")
+    },
+    content = function(file) {
+      write.csv(registros() %>% filter(usuario == user_data$username), file, row.names = FALSE)
+    }
+  )
 }
 
 # Run the application
