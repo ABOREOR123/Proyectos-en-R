@@ -1,5 +1,7 @@
 Documentación del Gym Progress Tracker (Shiny App)
 
+#Fallos en el generador de usuarios (La Seguirdad no asegura)
+
 Descripción General
 Aplicación Shiny para registrar y monitorear el progreso en el gimnasio, con las siguientes funcionalidades:
 - Registro de entrenamientos con peso, repeticiones y percepción de esfuerzo
