@@ -6,7 +6,7 @@ library(shinyjs)
 library(DT)
 library(shinyWidgets)
 
-# Datos de ejemplo
+
 ejercicios <- data.frame(
   dia = rep(c("Lunes", "Martes", "Miércoles", "Jueves", "Viernes"), each = 4),
   ejercicio = c(
@@ -25,7 +25,7 @@ ejercicios <- data.frame(
   )
 )
 
-# Grupos musculares para seguimiento de medidas
+
 grupos_musculares <- c(
   "Brazo (Contraído)" = "brazo_contraido",
   "Brazo (Relajado)" = "brazo_relajado",
