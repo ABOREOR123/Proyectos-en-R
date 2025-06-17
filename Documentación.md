@@ -145,3 +145,5 @@ Posibles Mejoras
 2. Sistema de objetivos y logros
 3. Planificación automática de rutinas
 4. Análisis de tendencias a largo plazo
+
+Si puedes mejorarlo estaria bien. 
