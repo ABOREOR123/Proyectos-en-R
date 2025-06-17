@@ -48,13 +48,13 @@ Retorna:
 4. Interfaz de Usuario (UI)
 
 Componentes Principales:
-- **Sistema de autenticación** (usuario/contraseña básico)
-- **Panel de registro**:
+- Sistema de autenticación (usuario/contraseña básico)
+- Panel de registro:
   - Selector de día y ejercicio
   - Inputs para peso, repeticiones, RPE (escala 1-10)
   - Checkbox para indicar fallo muscular
   - Área para notas
-- **Pestañas de visualización**:
+- Pestañas de visualización:
   - Progresión (gráfico de evolución)
   - Métricas (volumen y fuerza)
   - Historial (tabla de registros)
@@ -63,11 +63,11 @@ Componentes Principales:
 5. Lógica del Servidor (Server)
 
 Módulos Principales:
-1. **Autenticación**:
+1. Autenticación:
    - Valida credenciales (simulado)
    - Mantiene estado de sesión
 
-2. Almacenamiento de Datos**:
+2. Almacenamiento de Datos:
    - Guarda registros en archivo RDS
    - Maneja fotos de progreso
 
